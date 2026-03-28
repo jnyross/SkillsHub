@@ -1,0 +1,30 @@
+{
+  "evalCaseId": "eval-001",
+  "prompt": "Read the input files and create a summary document following the skill instructions.",
+  "inputFiles": [
+    {
+      "key": "article1.txt",
+      "content": "Artificial intelligence is transforming the healthcare industry. Machine learning algorithms can now detect diseases from medical images with accuracy rivaling human doctors. Natural language processing helps extract insights from clinical notes. These advances promise to reduce diagnostic errors and improve patient outcomes, though challenges around data privacy and algorithmic bias remain significant."
+    },
+    {
+      "key": "article2.txt",
+      "content": "The renewable energy sector has seen unprecedented growth in the past decade. Solar panel costs have dropped by over 80%, making solar energy competitive with fossil fuels in many markets. Wind energy capacity has tripled globally. Battery storage technology is advancing rapidly, addressing the intermittency challenge that has long been cited as a barrier to renewable adoption."
+    }
+  ],
+  "assertions": [
+    {
+      "type": "file_exists",
+      "path": "outputs/summary.md"
+    },
+    {
+      "type": "content_contains",
+      "path": "outputs/summary.md",
+      "value": "Summary"
+    },
+    {
+      "type": "content_contains",
+      "path": "outputs/summary.md",
+      "value": "Key Themes"
+    }
+  ]
+}

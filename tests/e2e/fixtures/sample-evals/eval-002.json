@@ -1,0 +1,26 @@
+{
+  "evalCaseId": "eval-002",
+  "prompt": "Read the input files and create a summary document following the skill instructions.",
+  "inputFiles": [
+    {
+      "key": "notes.txt",
+      "content": "Meeting notes from Q1 planning: The team agreed to prioritize three initiatives. First, migrating the legacy authentication system to OAuth 2.0. Second, implementing automated testing for the payment pipeline. Third, reducing API response times by 40% through caching improvements. Timeline: Auth migration by end of February, testing framework by mid-March, caching by end of Q1. Resource allocation: 2 engineers on auth, 1 on testing, 2 on caching."
+    }
+  ],
+  "assertions": [
+    {
+      "type": "file_exists",
+      "path": "outputs/summary.md"
+    },
+    {
+      "type": "content_contains",
+      "path": "outputs/summary.md",
+      "value": "Summary"
+    },
+    {
+      "type": "word_count_max",
+      "path": "outputs/summary.md",
+      "value": 500
+    }
+  ]
+}
