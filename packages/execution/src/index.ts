@@ -61,8 +61,9 @@ export function comparabilityHash(envelope: ExecutionEnvelope): string {
     data[field] = typeof value === "object" ? JSON.stringify(value) : String(value);
   }
 
-  // Include tool config in comparability
-  data["toolConfig"] = JSON.stringify(envelope.toolConfig);
+  // Include tool config in comparability (sort keys for deterministic hashing)
+  const sortedToolConfig = Object.fromEntries(Object.entries(envelope.toolConfig).sort(([a], [b]) => a.localeCompare(b)));
+  data["toolConfig"] = JSON.stringify(sortedToolConfig);
 
   const serialized = JSON.stringify(data, Object.keys(data).sort());
   return createHash("sha256").update(serialized).digest("hex");

@@ -64,6 +64,7 @@ export async function runClaudeCode(
     let stdout = "";
     let stderr = "";
     let killed = false;
+    let exited = false;
 
     const child = spawn("claude", args, {
       cwd: workdir,
@@ -78,7 +79,7 @@ export async function runClaudeCode(
       killed = true;
       child.kill("SIGTERM");
       setTimeout(() => {
-        if (!child.killed) {
+        if (!exited) {
           child.kill("SIGKILL");
         }
       }, 5000);
@@ -93,6 +94,7 @@ export async function runClaudeCode(
     });
 
     child.on("close", (code) => {
+      exited = true;
       clearTimeout(timer);
       const durationMs = Date.now() - startTime;
 

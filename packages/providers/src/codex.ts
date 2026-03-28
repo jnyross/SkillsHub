@@ -116,6 +116,7 @@ export async function runCodex(
     let stdout = "";
     let stderr = "";
     let killed = false;
+    let exited = false;
 
     const child = spawn("codex", args, {
       cwd: workdir,
@@ -130,7 +131,7 @@ export async function runCodex(
       killed = true;
       child.kill("SIGTERM");
       setTimeout(() => {
-        if (!child.killed) {
+        if (!exited) {
           child.kill("SIGKILL");
         }
       }, 5000);
@@ -145,6 +146,7 @@ export async function runCodex(
     });
 
     child.on("close", (code) => {
+      exited = true;
       clearTimeout(timer);
       const durationMs = Date.now() - startTime;
 
