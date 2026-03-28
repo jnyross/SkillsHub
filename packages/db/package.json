@@ -1,0 +1,27 @@
+{
+  "name": "@skillshub/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "prisma generate && tsc --build",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:push": "prisma db push",
+    "db:migrate:deploy": "prisma migrate deploy"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.5.0",
+    "@skillshub/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "prisma": "^6.5.0",
+    "typescript": "^5.7.3"
+  }
+}

@@ -19,6 +19,7 @@
     { "path": "packages/providers" },
     { "path": "packages/execution" },
     { "path": "packages/domain" },
+    { "path": "packages/db" },
     { "path": "apps/runner" }
   ]
 }
