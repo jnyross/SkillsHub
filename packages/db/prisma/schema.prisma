@@ -1,0 +1,398 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ─── §4.1 Project ────────────────────────────────────────────────
+model Project {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  status      String   @default("draft")
+  ownerUserId String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  briefs     ProjectBrief[]
+  skills     Skill[]
+  evalSets   EvalSet[]
+  iterations Iteration[]
+}
+
+// ─── §4.2 ProjectBrief (Discovery) ──────────────────────────────
+model ProjectBrief {
+  id                  String    @id @default(uuid())
+  projectId           String
+  sourcePrompt        String    @default("")
+  problemStatement    String    @default("")
+  targetUser          String    @default("")
+  successCriteriaJson String    @default("[]")
+  constraintsJson     String    @default("[]")
+  assumptionsJson     String    @default("[]")
+  openQuestionsJson   String    @default("[]")
+  approvedAt          DateTime?
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+}
+
+// ─── §4.3 Skill ─────────────────────────────────────────────────
+model Skill {
+  id                    String   @id @default(uuid())
+  projectId             String
+  name                  String
+  slug                  String
+  currentDraftVersionId String?
+  acceptedVersionId     String?
+  createdAt             DateTime @default(now())
+
+  project  Project        @relation(fields: [projectId], references: [id])
+  versions SkillVersion[]
+
+  @@unique([projectId, slug])
+  @@index([projectId])
+}
+
+// ─── §4.4 SkillVersion ──────────────────────────────────────────
+// State machine §8.1: draft → frozen → accepted → superseded
+model SkillVersion {
+  id                     String   @id @default(uuid())
+  skillId                String
+  versionNumber          Int
+  status                 String   @default("draft")
+  baseVersionId          String?
+  frontmatterName        String   @default("")
+  frontmatterDescription String   @default("")
+  bundleHash             String?
+  createdBy              String   @default("")
+  createdAt              DateTime @default(now())
+
+  skill Skill       @relation(fields: [skillId], references: [id])
+  files SkillFile[]
+
+  @@index([skillId, versionNumber(sort: Desc)])
+}
+
+// ─── §4.5 SkillFile ─────────────────────────────────────────────
+model SkillFile {
+  id             String  @id @default(uuid())
+  skillVersionId String
+  path           String
+  kind           String
+  storageUri     String
+  sha256         String
+  textPreview    String?
+
+  skillVersion SkillVersion @relation(fields: [skillVersionId], references: [id])
+
+  @@index([skillVersionId])
+}
+
+// ─── §4.6 EvalSet ───────────────────────────────────────────────
+// State machine §8.2: draft → frozen
+model EvalSet {
+  id        String   @id @default(uuid())
+  projectId String
+  name      String
+  status    String   @default("draft")
+  createdAt DateTime @default(now())
+
+  project Project    @relation(fields: [projectId], references: [id])
+  cases   EvalCase[]
+
+  @@index([projectId])
+}
+
+// ─── §4.7 EvalCase ──────────────────────────────────────────────
+model EvalCase {
+  id                String   @id @default(uuid())
+  evalSetId         String
+  slug              String
+  prompt            String
+  expectedOutput    String   @default("")
+  filesManifestJson String   @default("[]")
+  createdAt         DateTime @default(now())
+
+  evalSet    EvalSet     @relation(fields: [evalSetId], references: [id])
+  assertions Assertion[]
+
+  @@unique([evalSetId, slug])
+  @@index([evalSetId])
+}
+
+// ─── §4.8 Assertion ─────────────────────────────────────────────
+model Assertion {
+  id             String  @id @default(uuid())
+  evalCaseId     String
+  text           String
+  type           String
+  configJson     String  @default("{}")
+  isQuantitative Boolean @default(false)
+  createdBy      String  @default("")
+
+  evalCase EvalCase @relation(fields: [evalCaseId], references: [id])
+
+  @@index([evalCaseId])
+}
+
+// ─── §4.9 Iteration ─────────────────────────────────────────────
+// State machine §8.5
+model Iteration {
+  id                     String    @id @default(uuid())
+  projectId              String
+  number                 Int
+  skillVersionId         String
+  baselineSkillVersionId String?
+  evalSetId              String
+  snapshotHash           String    @default("")
+  modelConfigJson        String    @default("{}")
+  toolConfigJson         String    @default("{}")
+  budgetSnapshotJson     String    @default("{}")
+  reviewGateStatus       String    @default("locked")
+  launchBatchId          String?
+  status                 String    @default("drafting")
+  startedAt              DateTime?
+  completedAt            DateTime?
+  createdAt              DateTime  @default(now())
+
+  project        Project                 @relation(fields: [projectId], references: [id])
+  evalSnapshots  IterationEvalSnapshot[]
+  runs           Run[]
+  comparablePairs ComparablePair[]
+  benchmarks     Benchmark[]
+  reviewSessions ReviewSession[]
+
+  @@index([projectId, number(sort: Desc)])
+}
+
+// ─── §4.10 IterationEvalSnapshot ────────────────────────────────
+// Immutable once created. Preserves exactly what was tested.
+model IterationEvalSnapshot {
+  id                        String @id @default(uuid())
+  iterationId               String
+  evalCaseId                String
+  promptSnapshot            String
+  expectedOutputSnapshot    String @default("")
+  filesManifestSnapshotJson String @default("[]")
+  assertionsSnapshotJson    String @default("[]")
+  snapshotHash              String
+
+  iteration Iteration @relation(fields: [iterationId], references: [id])
+
+  @@index([iterationId])
+  @@index([evalCaseId])
+}
+
+// ─── §4.11 Run ──────────────────────────────────────────────────
+// State machine §8.3
+model Run {
+  id                     String    @id @default(uuid())
+  iterationId            String
+  evalSnapshotId         String
+  config                 String
+  status                 String    @default("queued")
+  executionEnvelopeId    String?
+  artifactManifestId     String?
+  sandboxId              String?
+  runnerVersion          String    @default("")
+  transcriptUri          String?
+  failureReason          String?
+  lineageParentRunId     String?
+  supersededByRunId      String?
+  comparableAttemptGroup String    @default("")
+  startedAt              DateTime?
+  resultReceivedAt       DateTime?
+  finalizedAt            DateTime?
+  completedAt            DateTime?
+  createdAt              DateTime  @default(now())
+
+  iteration Iteration    @relation(fields: [iterationId], references: [id])
+  metrics   RunMetrics?
+  grades    Grade[]
+
+  @@index([iterationId, status])
+  @@index([evalSnapshotId, config, status])
+}
+
+// ─── §4.12 RunMetrics ───────────────────────────────────────────
+// §1.3: Captured at run completion, persisted immediately
+model RunMetrics {
+  runId        String   @id
+  totalTokens  Int
+  durationMs   Int
+  totalCostUsd Float?
+  capturedAt   DateTime @default(now())
+
+  run Run @relation(fields: [runId], references: [id])
+}
+
+// ─── §4.13 ExecutionEnvelope ────────────────────────────────────
+// §9.1: The core trust mechanism
+model ExecutionEnvelope {
+  id                         String   @id @default(uuid())
+  runId                      String   @unique
+  iterationId                String
+  evalSnapshotId             String
+  provider                   String
+  modelId                    String
+  modelConfigHash            String
+  systemPromptHash           String
+  backend                    String
+  toolPolicyHash             String
+  toolListHash               String
+  promptWrapperHash          String
+  runnerImageDigest          String   @default("")
+  runnerVersion              String
+  transcriptSchemaVersion    String   @default("1")
+  inputManifestHash          String
+  inputFilesHash             String
+  timeoutSeconds             Int
+  resourceProfileHash        String   @default("")
+  envAllowlistHash           String   @default("")
+  skillMode                  String
+  skillBundleHash            String?
+  availableSkillsContextHash String   @default("")
+  retryPolicyHash            String   @default("")
+  comparabilityHash          String
+  createdAt                  DateTime @default(now())
+
+  @@index([comparabilityHash])
+}
+
+// ─── §4.14 ArtifactManifest ─────────────────────────────────────
+// §6.2: staging → complete_unverified → committed
+model ArtifactManifest {
+  id                    String    @id @default(uuid())
+  runId                 String    @unique
+  status                String    @default("staging")
+  declaredArtifactCount Int       @default(0)
+  verifiedArtifactCount Int       @default(0)
+  manifestHash          String    @default("")
+  storageUri            String    @default("")
+  createdAt             DateTime  @default(now())
+  committedAt           DateTime?
+}
+
+// ─── §4.15 Grade ────────────────────────────────────────────────
+// §15.1: grading output with expectations[].{text, passed, evidence}
+model Grade {
+  id                    String   @id @default(uuid())
+  runId                 String
+  graderVersion         String
+  assertionSnapshotHash String
+  gradingJson           String   @default("{}")
+  completedAt           DateTime @default(now())
+
+  run Run @relation(fields: [runId], references: [id])
+
+  @@index([runId])
+}
+
+// ─── §4.16 ComparablePair ───────────────────────────────────────
+// State machine §8.4
+model ComparablePair {
+  id                      String  @id @default(uuid())
+  iterationId             String
+  evalSnapshotId          String
+  primaryRunId            String
+  baselineRunId           String
+  comparabilityHash       String
+  gradedWithGraderVersion String?
+  status                  String  @default("pending")
+  exclusionReason         String?
+
+  iteration Iteration @relation(fields: [iterationId], references: [id])
+
+  @@index([iterationId, status])
+}
+
+// ─── §4.17 Benchmark ────────────────────────────────────────────
+model Benchmark {
+  id               String   @id @default(uuid())
+  iterationId      String
+  benchmarkJson    String   @default("{}")
+  benchmarkHash    String
+  benchmarkMdUri   String?
+  analystNotesJson String   @default("{}")
+  createdAt        DateTime @default(now())
+
+  iteration Iteration @relation(fields: [iterationId], references: [id])
+
+  @@index([iterationId])
+}
+
+// ─── §4.18 ReviewSession ────────────────────────────────────────
+// State machine §8.6
+model ReviewSession {
+  id                    String    @id @default(uuid())
+  iterationId           String
+  iterationSnapshotHash String
+  benchmarkHash         String
+  status                String    @default("open")
+  staleAt               DateTime?
+  waivedBy              String?
+  waiverReason          String?
+  submittedBy           String?
+  submittedAt           DateTime?
+  createdAt             DateTime  @default(now())
+
+  iteration Iteration @relation(fields: [iterationId], references: [id])
+  reviews   Review[]
+
+  @@index([iterationId])
+}
+
+// ─── §4.19 Review ───────────────────────────────────────────────
+model Review {
+  id              String   @id @default(uuid())
+  reviewSessionId String
+  runId           String
+  runManifestHash String
+  feedback        String
+  timestamp       DateTime @default(now())
+
+  reviewSession ReviewSession @relation(fields: [reviewSessionId], references: [id])
+
+  @@index([reviewSessionId, runId])
+}
+
+// ─── §4.20 OptimizationJob (Phase 4, schema only) ──────────────
+model OptimizationJob {
+  id              String   @id @default(uuid())
+  skillVersionId  String
+  status          String   @default("draft_evals")
+  evalQueriesJson String   @default("[]")
+  trainSplitJson  String   @default("{}")
+  testSplitJson   String   @default("{}")
+  bestDescription String?
+  reportUri       String?
+  createdAt       DateTime @default(now())
+}
+
+// ─── §4.21 PackageArtifact (Phase 3, schema only) ──────────────
+model PackageArtifact {
+  id             String   @id @default(uuid())
+  skillVersionId String
+  format         String   @default("skill_bundle")
+  storageUri     String
+  checksum       String
+  createdAt      DateTime @default(now())
+}
+
+// ─── §4.22 AuditEvent ───────────────────────────────────────────
+model AuditEvent {
+  id          String   @id @default(uuid())
+  entityType  String
+  entityId    String
+  eventType   String
+  actorUserId String?
+  payloadJson String   @default("{}")
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt(sort: Desc)])
+}

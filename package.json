@@ -8,7 +8,10 @@
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
     "test:e2e": "vitest run --config tests/e2e/vitest.config.ts",
-    "db:migrate": "echo 'TODO: wire up migration runner'"
+    "db:generate": "pnpm --filter @skillshub/db exec prisma generate",
+    "db:migrate": "pnpm --filter @skillshub/db exec prisma migrate dev",
+    "db:migrate:deploy": "pnpm --filter @skillshub/db exec prisma migrate deploy",
+    "db:push": "pnpm --filter @skillshub/db exec prisma db push"
   },
   "devDependencies": {
     "typescript": "^5.7.3",
