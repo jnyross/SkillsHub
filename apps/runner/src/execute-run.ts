@@ -124,15 +124,19 @@ export async function executeRun(config: RunConfig): Promise<RunResult> {
   if (config.skillBundleUri && (config.mode === "with_skill" || config.mode === "old_skill")) {
     const bundlePath = path.join(workdir, "skill-bundle.tar.gz");
     await downloadFromS3(s3, bucket, config.skillBundleUri, bundlePath);
-    // Extract the bundle — using tar
-    const { execSync } = await import("node:child_process");
-    execSync(`tar -xzf "${bundlePath}" -C "${skillDir}"`, { stdio: "pipe" });
+    // Extract the bundle — using execFileSync to avoid shell injection
+    const { execFileSync } = await import("node:child_process");
+    execFileSync("tar", ["-xzf", bundlePath, "-C", skillDir], { stdio: "pipe" });
   }
 
   // 3. Mount input files
   if (config.inputFilesManifest) {
     for (const file of config.inputFilesManifest) {
       const dest = path.join(inputsDir, file.key);
+      // Prevent path traversal: ensure dest is still within inputsDir
+      if (!dest.startsWith(inputsDir + path.sep) && dest !== inputsDir) {
+        throw new Error(`Path traversal detected in input file key: ${file.key}`);
+      }
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       await downloadFromS3(s3, bucket, file.s3Key, dest);
     }
