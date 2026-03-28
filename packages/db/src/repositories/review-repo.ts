@@ -12,23 +12,25 @@ export async function createReviewSession(
     benchmarkHash: string;
   },
 ): Promise<ReviewSession> {
-  // Check for existing open session
-  const existingOpen = await prisma.reviewSession.findFirst({
-    where: { iterationId, status: "open" },
-  });
-  if (existingOpen) {
-    throw new Error(
-      `Iteration ${iterationId} already has an open review session: ${existingOpen.id}`,
-    );
-  }
+  return prisma.$transaction(async (tx) => {
+    // Check for existing open session (§5.2 — atomic with creation)
+    const existingOpen = await tx.reviewSession.findFirst({
+      where: { iterationId, status: "open" },
+    });
+    if (existingOpen) {
+      throw new Error(
+        `Iteration ${iterationId} already has an open review session: ${existingOpen.id}`,
+      );
+    }
 
-  return prisma.reviewSession.create({
-    data: {
-      iterationId,
-      iterationSnapshotHash: input.iterationSnapshotHash,
-      benchmarkHash: input.benchmarkHash,
-      status: "open",
-    },
+    return tx.reviewSession.create({
+      data: {
+        iterationId,
+        iterationSnapshotHash: input.iterationSnapshotHash,
+        benchmarkHash: input.benchmarkHash,
+        status: "open",
+      },
+    });
   });
 }
 

@@ -1,9 +1,14 @@
 import { prisma } from "../index.js";
 import type { ComparablePair } from "@prisma/client";
+import {
+  assertValidComparablePairTransition,
+  type ComparablePairStatus,
+} from "@skillshub/domain";
 
 /**
  * Update pair status when a run finalizes (§10.6).
- * Checks both runs succeeded, then verifies envelope comparability.
+ * Wrapped in a transaction to prevent race conditions.
+ * All transitions validated against §8.4 state machine.
  *
  * §7.2: Pair is benchmark-eligible only if both succeeded + same comparabilityHash
  * + same grader version.
@@ -11,100 +16,126 @@ import type { ComparablePair } from "@prisma/client";
 export async function updatePairOnRunFinalized(
   runId: string,
 ): Promise<ComparablePair | null> {
-  // Find the pair that includes this run
-  const pair = await prisma.comparablePair.findFirst({
-    where: {
-      OR: [{ primaryRunId: runId }, { baselineRunId: runId }],
-    },
-  });
-
-  if (!pair) return null;
-
-  // Load both runs
-  const [primaryRun, baselineRun] = await Promise.all([
-    prisma.run.findUniqueOrThrow({ where: { id: pair.primaryRunId } }),
-    prisma.run.findUniqueOrThrow({ where: { id: pair.baselineRunId } }),
-  ]);
-
-  // Check if either run failed
-  const failedStatuses = [
-    "provisioning_failed",
-    "running_failed",
-    "timed_out",
-    "finalization_failed",
-    "canceled",
-  ];
-
-  if (failedStatuses.includes(primaryRun.status)) {
-    return prisma.comparablePair.update({
-      where: { id: pair.id },
-      data: { status: "awaiting_comparable_retry" },
-    });
-  }
-
-  if (failedStatuses.includes(baselineRun.status)) {
-    return prisma.comparablePair.update({
-      where: { id: pair.id },
-      data: { status: "awaiting_comparable_retry" },
-    });
-  }
-
-  // If both succeeded, check envelope comparability
-  if (primaryRun.status === "succeeded" && baselineRun.status === "succeeded") {
-    // Load execution envelopes
-    const [primaryEnvelope, baselineEnvelope] = await Promise.all([
-      prisma.executionEnvelope.findUnique({
-        where: { runId: pair.primaryRunId },
-      }),
-      prisma.executionEnvelope.findUnique({
-        where: { runId: pair.baselineRunId },
-      }),
-    ]);
-
-    if (!primaryEnvelope || !baselineEnvelope) {
-      return prisma.comparablePair.update({
-        where: { id: pair.id },
-        data: {
-          status: "excluded",
-          exclusionReason: "Missing execution envelope",
-        },
-      });
-    }
-
-    // §9.3: Compare comparability hashes
-    if (
-      primaryEnvelope.comparabilityHash !== baselineEnvelope.comparabilityHash
-    ) {
-      return prisma.comparablePair.update({
-        where: { id: pair.id },
-        data: {
-          status: "excluded",
-          exclusionReason: `Envelope mismatch: ${primaryEnvelope.comparabilityHash} vs ${baselineEnvelope.comparabilityHash}`,
-        },
-      });
-    }
-
-    // Comparable!
-    return prisma.comparablePair.update({
-      where: { id: pair.id },
-      data: {
-        status: "comparable",
-        comparabilityHash: primaryEnvelope.comparabilityHash,
+  return prisma.$transaction(async (tx) => {
+    // Find the pair that includes this run
+    const pair = await tx.comparablePair.findFirst({
+      where: {
+        OR: [{ primaryRunId: runId }, { baselineRunId: runId }],
       },
     });
-  }
 
-  // One or both still in progress — update to awaiting state
-  if (primaryRun.status !== "succeeded") {
-    return prisma.comparablePair.update({
+    if (!pair) return null;
+
+    const currentStatus = pair.status as ComparablePairStatus;
+
+    // Load both runs
+    const [primaryRun, baselineRun] = await Promise.all([
+      tx.run.findUniqueOrThrow({ where: { id: pair.primaryRunId } }),
+      tx.run.findUniqueOrThrow({ where: { id: pair.baselineRunId } }),
+    ]);
+
+    const failedStatuses = [
+      "provisioning_failed",
+      "running_failed",
+      "timed_out",
+      "finalization_failed",
+      "canceled",
+    ];
+
+    const primaryFailed = failedStatuses.includes(primaryRun.status);
+    const baselineFailed = failedStatuses.includes(baselineRun.status);
+    const primarySucceeded = primaryRun.status === "succeeded";
+    const baselineSucceeded = baselineRun.status === "succeeded";
+
+    // Determine the correct target status based on current state and run statuses
+    let targetStatus: ComparablePairStatus;
+    let extraData: Record<string, unknown> = {};
+
+    if (primaryFailed || baselineFailed) {
+      // A run failed — if we're already in an awaiting state, go to awaiting_comparable_retry;
+      // if still pending, go to the appropriate awaiting state first (or excluded)
+      if (
+        currentStatus === "awaiting_primary" ||
+        currentStatus === "awaiting_baseline" ||
+        currentStatus === "awaiting_comparable_retry"
+      ) {
+        targetStatus = "awaiting_comparable_retry";
+      } else if (currentStatus === "pending") {
+        // From pending, we can't go to awaiting_comparable_retry directly.
+        // Go to the correct awaiting state based on which run completed/failed.
+        if (runId === pair.primaryRunId) {
+          targetStatus = "awaiting_primary";
+        } else {
+          targetStatus = "awaiting_baseline";
+        }
+      } else {
+        // From other states (comparable, graded, etc.), exclude
+        targetStatus = "excluded";
+        extraData = { exclusionReason: "Run failed after pair was already progressed" };
+      }
+    } else if (primarySucceeded && baselineSucceeded) {
+      // Both succeeded — check envelope comparability
+      const [primaryEnvelope, baselineEnvelope] = await Promise.all([
+        tx.executionEnvelope.findUnique({ where: { runId: pair.primaryRunId } }),
+        tx.executionEnvelope.findUnique({ where: { runId: pair.baselineRunId } }),
+      ]);
+
+      if (!primaryEnvelope || !baselineEnvelope) {
+        targetStatus = "excluded";
+        extraData = { exclusionReason: "Missing execution envelope" };
+      } else if (primaryEnvelope.comparabilityHash !== baselineEnvelope.comparabilityHash) {
+        // §9.3: Different comparability hashes
+        targetStatus = "excluded";
+        extraData = {
+          exclusionReason: `Envelope mismatch: ${primaryEnvelope.comparabilityHash} vs ${baselineEnvelope.comparabilityHash}`,
+        };
+      } else {
+        // Comparable! Need to get to comparable state via valid transitions.
+        // From pending → awaiting_primary/baseline → comparable
+        // From awaiting_* → comparable
+        if (currentStatus === "pending") {
+          // Transition through awaiting state first, then to comparable
+          const intermediateStatus: ComparablePairStatus =
+            runId === pair.primaryRunId ? "awaiting_baseline" : "awaiting_primary";
+          assertValidComparablePairTransition(currentStatus, intermediateStatus);
+          await tx.comparablePair.update({
+            where: { id: pair.id },
+            data: { status: intermediateStatus },
+          });
+          // Now transition to comparable
+          assertValidComparablePairTransition(intermediateStatus, "comparable");
+          return tx.comparablePair.update({
+            where: { id: pair.id },
+            data: {
+              status: "comparable",
+              comparabilityHash: primaryEnvelope.comparabilityHash,
+            },
+          });
+        }
+        targetStatus = "comparable";
+        extraData = { comparabilityHash: primaryEnvelope.comparabilityHash };
+      }
+    } else {
+      // One run still in progress — update to the correct awaiting state
+      if (!primarySucceeded && !primaryFailed) {
+        targetStatus = "awaiting_primary";
+      } else {
+        targetStatus = "awaiting_baseline";
+      }
+    }
+
+    // Skip if already in the target state
+    if (currentStatus === targetStatus) {
+      return pair;
+    }
+
+    // Validate the transition against §8.4 state machine
+    assertValidComparablePairTransition(currentStatus, targetStatus);
+
+    return tx.comparablePair.update({
       where: { id: pair.id },
-      data: { status: "awaiting_primary" },
+      data: { status: targetStatus, ...extraData },
     });
-  }
-
-  return prisma.comparablePair.update({
-    where: { id: pair.id },
-    data: { status: "awaiting_baseline" },
   });
 }
 
@@ -127,6 +158,8 @@ export async function markPairGraded(
   pairId: string,
   graderVersion: string,
 ): Promise<ComparablePair> {
+  const pair = await prisma.comparablePair.findUniqueOrThrow({ where: { id: pairId } });
+  assertValidComparablePairTransition(pair.status as ComparablePairStatus, "graded");
   return prisma.comparablePair.update({
     where: { id: pairId },
     data: {
@@ -142,6 +175,8 @@ export async function markPairGraded(
 export async function markPairInBenchmark(
   pairId: string,
 ): Promise<ComparablePair> {
+  const pair = await prisma.comparablePair.findUniqueOrThrow({ where: { id: pairId } });
+  assertValidComparablePairTransition(pair.status as ComparablePairStatus, "included_in_benchmark");
   return prisma.comparablePair.update({
     where: { id: pairId },
     data: { status: "included_in_benchmark" },

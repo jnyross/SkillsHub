@@ -225,7 +225,9 @@ export async function transitionIterationStatus(
 
   const data: Record<string, unknown> = { status: to };
   if (to === "running" || to === "queued") {
-    data["startedAt"] = new Date();
+    if (!iteration.startedAt) {
+      data["startedAt"] = new Date();
+    }
   }
   if (to === "completed" || to === "failed" || to === "canceled") {
     data["completedAt"] = new Date();
