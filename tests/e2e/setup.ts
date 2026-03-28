@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
+import * as net from "node:net";
 import { S3Client, CreateBucketCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
-import { Client as PgClient } from "pg";
 
 /**
  * E2E test environment setup.
@@ -28,19 +28,38 @@ function checkEnvVar(name: string): boolean {
 }
 
 async function checkPostgres(): Promise<boolean> {
-  const url = process.env["DATABASE_URL"] ?? "postgresql://skillshub:skillshub@localhost:5432/skillshub";
-  const client = new PgClient({ connectionString: url });
+  const dbUrl = process.env["DATABASE_URL"] ?? "postgresql://skillshub:skillshub@localhost:5432/skillshub";
+  let host = "localhost";
+  let port = 5432;
+
   try {
-    await client.connect();
-    await client.query("SELECT 1");
-    console.log("  [OK] PostgreSQL is reachable");
-    return true;
-  } catch (err) {
-    console.error(`  [FAIL] PostgreSQL is not reachable: ${(err as Error).message}`);
-    return false;
-  } finally {
-    await client.end();
+    const url = new URL(dbUrl);
+    host = url.hostname;
+    port = parseInt(url.port, 10) || 5432;
+  } catch {
+    // fallback to defaults
   }
+
+  return new Promise<boolean>((resolve) => {
+    const socket = new net.Socket();
+    socket.setTimeout(3000);
+    socket.on("connect", () => {
+      console.log("  [OK] PostgreSQL is reachable");
+      socket.destroy();
+      resolve(true);
+    });
+    socket.on("timeout", () => {
+      console.error("  [FAIL] PostgreSQL connection timed out");
+      socket.destroy();
+      resolve(false);
+    });
+    socket.on("error", (err) => {
+      console.error(`  [FAIL] PostgreSQL is not reachable: ${err.message}`);
+      socket.destroy();
+      resolve(false);
+    });
+    socket.connect(port, host);
+  });
 }
 
 async function checkAndCreateS3Bucket(): Promise<boolean> {

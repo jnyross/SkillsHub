@@ -1,12 +1,15 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { executeWithProvider } from "@skillshub/providers";
 import type { ProviderConfig, ProviderResult } from "@skillshub/providers";
 import { comparabilityHash } from "@skillshub/execution";
 import type { ExecutionEnvelope } from "@skillshub/execution";
 import { ModelConfigSchema } from "@skillshub/domain";
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const FIXTURES_DIR = path.resolve(__dirname, "fixtures");
 const BACKEND = "codex" as const;
 const MODEL_ID = "o4-mini";
