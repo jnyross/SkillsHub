@@ -73,46 +73,57 @@ export async function submitReviewSession(
   benchmarkHash: string,
   submittedBy: string,
 ): Promise<ReviewSession> {
-  const session = await prisma.reviewSession.findUniqueOrThrow({
-    where: { id: sessionId },
-  });
-
-  if (session.status !== "open") {
-    throw new Error(
-      `Cannot submit review session in status: ${session.status}`,
-    );
-  }
-
-  if (session.benchmarkHash !== benchmarkHash) {
-    throw new Error(
-      `Benchmark hash mismatch: expected ${session.benchmarkHash}, got ${benchmarkHash}. Session may be stale.`,
-    );
-  }
-
-  // Check for staleness: is there a newer benchmark for this iteration?
-  const latestBenchmark = await prisma.benchmark.findFirst({
-    where: { iterationId: session.iterationId },
-    orderBy: { createdAt: "desc" },
-  });
-  if (latestBenchmark && latestBenchmark.benchmarkHash !== benchmarkHash) {
-    // Mark session as stale
-    await prisma.reviewSession.update({
+  // Use transaction for atomic check-then-act. The stale case must commit
+  // (not rollback), so we return the stale session and throw AFTER the
+  // transaction completes.
+  const result = await prisma.$transaction(async (tx) => {
+    const session = await tx.reviewSession.findUniqueOrThrow({
       where: { id: sessionId },
-      data: { status: "stale", staleAt: new Date() },
     });
+
+    if (session.status !== "open") {
+      throw new Error(
+        `Cannot submit review session in status: ${session.status}`,
+      );
+    }
+
+    if (session.benchmarkHash !== benchmarkHash) {
+      throw new Error(
+        `Benchmark hash mismatch: expected ${session.benchmarkHash}, got ${benchmarkHash}. Session may be stale.`,
+      );
+    }
+
+    // Check for staleness: is there a newer benchmark for this iteration?
+    const latestBenchmark = await tx.benchmark.findFirst({
+      where: { iterationId: session.iterationId },
+      orderBy: { createdAt: "desc" },
+    });
+    if (latestBenchmark && latestBenchmark.benchmarkHash !== benchmarkHash) {
+      // Mark session as stale — return (don't throw) so the tx commits
+      return tx.reviewSession.update({
+        where: { id: sessionId },
+        data: { status: "stale", staleAt: new Date() },
+      });
+    }
+
+    return tx.reviewSession.update({
+      where: { id: sessionId },
+      data: {
+        status: "submitted",
+        submittedBy,
+        submittedAt: new Date(),
+      },
+    });
+  });
+
+  // Throw after transaction committed so the stale status persists in DB
+  if (result.status === "stale") {
     throw new Error(
       "Review session is stale: a newer benchmark exists for this iteration",
     );
   }
 
-  return prisma.reviewSession.update({
-    where: { id: sessionId },
-    data: {
-      status: "submitted",
-      submittedBy,
-      submittedAt: new Date(),
-    },
-  });
+  return result;
 }
 
 /**

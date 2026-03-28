@@ -62,8 +62,9 @@ export async function updatePairOnRunFinalized(
         targetStatus = "awaiting_comparable_retry";
       } else if (currentStatus === "pending") {
         // From pending, we can't go to awaiting_comparable_retry directly.
-        // Go to the correct awaiting state based on which run completed/failed.
-        if (runId === pair.primaryRunId) {
+        // Go to the correct awaiting state based on which run FAILED (not which callback fired).
+        // "awaiting_primary" means "primary needs retry", "awaiting_baseline" means "baseline needs retry".
+        if (primaryFailed) {
           targetStatus = "awaiting_primary";
         } else {
           targetStatus = "awaiting_baseline";
@@ -93,8 +94,10 @@ export async function updatePairOnRunFinalized(
         // Comparable! Need to get to comparable state via valid transitions.
         // From pending → awaiting_primary/baseline → comparable
         // From awaiting_* → comparable
-        if (currentStatus === "pending") {
-          // Transition through awaiting state first, then to comparable
+        if (currentStatus === "pending" || currentStatus === "awaiting_comparable_retry") {
+          // Need intermediate awaiting state before reaching comparable.
+          // From pending: pending → awaiting_X → comparable
+          // From awaiting_comparable_retry: awaiting_comparable_retry → awaiting_X → comparable
           const intermediateStatus: ComparablePairStatus =
             runId === pair.primaryRunId ? "awaiting_baseline" : "awaiting_primary";
           assertValidComparablePairTransition(currentStatus, intermediateStatus);
