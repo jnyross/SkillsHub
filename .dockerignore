@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.git/
+.env
+.env.local
+*.tsbuildinfo
+coverage/
+tests/
+.github/
+scripts/
+*.md
+.dockerignore
+.gitignore

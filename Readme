@@ -1,1 +1,89 @@
+# SkillsHub
 
+A platform for creating, evaluating, and iterating on AI coding skills using Claude Code CLI and Codex CLI as execution backends.
+
+## Architecture
+
+```
+skillshub/
+├── apps/
+│   ├── runner/          # Executes skill runs via CLI backends
+│   ├── web/             # Web frontend (planned)
+│   └── worker/          # Background job processor (planned)
+├── packages/
+│   ├── providers/       # CLI backend adapters (Claude Code, Codex)
+│   ├── execution/       # Execution envelope & comparability logic
+│   └── domain/          # Domain schemas (ModelConfig, ToolConfig)
+├── tests/
+│   └── e2e/             # End-to-end tests for both backends
+├── scripts/             # Dev setup and smoke test scripts
+├── docker-compose.yml   # Local dev infrastructure
+└── .github/workflows/   # CI configuration
+```
+
+## Prerequisites
+
+- Node.js 20+
+- pnpm 9+
+- Docker & Docker Compose
+- Claude Code CLI (`npm install -g @anthropic-ai/claude-code`)
+- Codex CLI (`npm install -g @openai/codex`)
+
+## Quick Start
+
+```bash
+# 1. Run the dev setup script
+bash scripts/setup-dev.sh
+
+# 2. Install dependencies
+pnpm install
+
+# 3. Build all packages
+pnpm build
+
+# 4. Run smoke tests
+bash scripts/test-runner.sh
+```
+
+## Provider Backends
+
+### Claude Code (`claude-code`)
+- Uses the `claude` CLI from `@anthropic-ai/claude-code`
+- Requires `ANTHROPIC_API_KEY`
+- Outputs structured JSON with token usage and cost
+
+### Codex (`codex`)
+- Uses the `codex` CLI from `@openai/codex`
+- Requires `OPENAI_API_KEY`
+- Runs in `full-auto` approval mode
+
+## Key Concepts
+
+### Execution Envelope
+Each run is wrapped in an `ExecutionEnvelope` that tracks the backend, provider, model, and configuration. The `comparabilityHash` ensures that only runs with identical configurations can be compared.
+
+**Important:** Cross-backend comparisons are not allowed. A Claude Code run cannot be paired with a Codex run.
+
+### Run Modes
+- `with_skill` — Run with skill context (SKILL.md prepended to prompt)
+- `without_skill` — Run without skill context (baseline)
+- `old_skill` — Run with a previous version of the skill
+
+## E2E Testing
+
+E2E tests use real API calls and cost real money. They are triggered manually:
+
+```bash
+# Run via GitHub Actions (recommended)
+# Go to Actions -> E2E Tests -> Run workflow -> Select backend
+
+# Run locally
+pnpm test:e2e
+```
+
+## Contributing
+
+1. Create a feature branch
+2. Make changes
+3. Run `pnpm build && pnpm lint`
+4. Submit a PR

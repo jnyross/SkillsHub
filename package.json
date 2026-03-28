@@ -1,0 +1,17 @@
+{
+  "name": "skillshub",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "lint": "pnpm -r run lint",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "test:e2e": "vitest run --config tests/e2e/vitest.config.ts",
+    "db:migrate": "echo 'TODO: wire up migration runner'"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^3.1.1"
+  }
+}
