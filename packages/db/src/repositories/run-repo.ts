@@ -10,43 +10,45 @@ export async function transitionRunStatus(
   to: RunStatus,
   extra?: { failureReason?: string; sandboxId?: string },
 ): Promise<Run> {
-  const run = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
+  return prisma.$transaction(async (tx) => {
+    const run = await tx.run.findUniqueOrThrow({ where: { id: runId } });
 
-  assertValidRunTransition(run.status as RunStatus, to);
+    assertValidRunTransition(run.status as RunStatus, to);
 
-  const data: Record<string, unknown> = { status: to };
+    const data: Record<string, unknown> = { status: to };
 
-  // Set timestamps for specific transitions
-  if (to === "provisioning" || to === "running") {
-    if (!run.startedAt) {
-      data["startedAt"] = new Date();
+    // Set timestamps for specific transitions
+    if (to === "provisioning" || to === "running") {
+      if (!run.startedAt) {
+        data["startedAt"] = new Date();
+      }
     }
-  }
-  if (to === "result_received") {
-    data["resultReceivedAt"] = new Date();
-  }
-  if (to === "succeeded" || to === "finalization_failed") {
-    data["finalizedAt"] = new Date();
-  }
-  if (
-    to === "succeeded" ||
-    to === "provisioning_failed" ||
-    to === "running_failed" ||
-    to === "timed_out" ||
-    to === "finalization_failed" ||
-    to === "canceled"
-  ) {
-    data["completedAt"] = new Date();
-  }
+    if (to === "result_received") {
+      data["resultReceivedAt"] = new Date();
+    }
+    if (to === "succeeded" || to === "finalization_failed") {
+      data["finalizedAt"] = new Date();
+    }
+    if (
+      to === "succeeded" ||
+      to === "provisioning_failed" ||
+      to === "running_failed" ||
+      to === "timed_out" ||
+      to === "finalization_failed" ||
+      to === "canceled"
+    ) {
+      data["completedAt"] = new Date();
+    }
 
-  if (extra?.failureReason) {
-    data["failureReason"] = extra.failureReason;
-  }
-  if (extra?.sandboxId) {
-    data["sandboxId"] = extra.sandboxId;
-  }
+    if (extra?.failureReason) {
+      data["failureReason"] = extra.failureReason;
+    }
+    if (extra?.sandboxId) {
+      data["sandboxId"] = extra.sandboxId;
+    }
 
-  return prisma.run.update({ where: { id: runId }, data });
+    return tx.run.update({ where: { id: runId }, data });
+  });
 }
 
 /**
@@ -110,6 +112,17 @@ export async function createRetryRun(parentRunId: string): Promise<Run> {
     await tx.run.update({
       where: { id: parentRunId },
       data: { supersededByRunId: retryRun.id },
+    });
+
+    // Update ComparablePair references so the retry run is discoverable
+    // by updatePairOnRunFinalized (§17.1)
+    await tx.comparablePair.updateMany({
+      where: { primaryRunId: parentRunId },
+      data: { primaryRunId: retryRun.id },
+    });
+    await tx.comparablePair.updateMany({
+      where: { baselineRunId: parentRunId },
+      data: { baselineRunId: retryRun.id },
     });
 
     return retryRun;

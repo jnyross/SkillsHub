@@ -158,14 +158,16 @@ export async function markPairGraded(
   pairId: string,
   graderVersion: string,
 ): Promise<ComparablePair> {
-  const pair = await prisma.comparablePair.findUniqueOrThrow({ where: { id: pairId } });
-  assertValidComparablePairTransition(pair.status as ComparablePairStatus, "graded");
-  return prisma.comparablePair.update({
-    where: { id: pairId },
-    data: {
-      status: "graded",
-      gradedWithGraderVersion: graderVersion,
-    },
+  return prisma.$transaction(async (tx) => {
+    const pair = await tx.comparablePair.findUniqueOrThrow({ where: { id: pairId } });
+    assertValidComparablePairTransition(pair.status as ComparablePairStatus, "graded");
+    return tx.comparablePair.update({
+      where: { id: pairId },
+      data: {
+        status: "graded",
+        gradedWithGraderVersion: graderVersion,
+      },
+    });
   });
 }
 
@@ -175,10 +177,12 @@ export async function markPairGraded(
 export async function markPairInBenchmark(
   pairId: string,
 ): Promise<ComparablePair> {
-  const pair = await prisma.comparablePair.findUniqueOrThrow({ where: { id: pairId } });
-  assertValidComparablePairTransition(pair.status as ComparablePairStatus, "included_in_benchmark");
-  return prisma.comparablePair.update({
-    where: { id: pairId },
-    data: { status: "included_in_benchmark" },
+  return prisma.$transaction(async (tx) => {
+    const pair = await tx.comparablePair.findUniqueOrThrow({ where: { id: pairId } });
+    assertValidComparablePairTransition(pair.status as ComparablePairStatus, "included_in_benchmark");
+    return tx.comparablePair.update({
+      where: { id: pairId },
+      data: { status: "included_in_benchmark" },
+    });
   });
 }

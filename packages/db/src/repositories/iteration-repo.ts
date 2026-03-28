@@ -217,25 +217,27 @@ export async function transitionIterationStatus(
   iterationId: string,
   to: IterationStatus,
 ): Promise<Iteration> {
-  const iteration = await prisma.iteration.findUniqueOrThrow({
-    where: { id: iterationId },
-  });
+  return prisma.$transaction(async (tx) => {
+    const iteration = await tx.iteration.findUniqueOrThrow({
+      where: { id: iterationId },
+    });
 
-  assertValidIterationTransition(iteration.status as IterationStatus, to);
+    assertValidIterationTransition(iteration.status as IterationStatus, to);
 
-  const data: Record<string, unknown> = { status: to };
-  if (to === "running" || to === "queued") {
-    if (!iteration.startedAt) {
-      data["startedAt"] = new Date();
+    const data: Record<string, unknown> = { status: to };
+    if (to === "running" || to === "queued") {
+      if (!iteration.startedAt) {
+        data["startedAt"] = new Date();
+      }
     }
-  }
-  if (to === "completed" || to === "failed" || to === "canceled") {
-    data["completedAt"] = new Date();
-  }
+    if (to === "completed" || to === "failed" || to === "canceled") {
+      data["completedAt"] = new Date();
+    }
 
-  return prisma.iteration.update({
-    where: { id: iterationId },
-    data,
+    return tx.iteration.update({
+      where: { id: iterationId },
+      data,
+    });
   });
 }
 
